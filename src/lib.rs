@@ -4,6 +4,9 @@
 #![deny(missing_docs)]
 #![deny(unsafe_code)]
 
+#[macro_use]
+extern crate log;
+
 pub use crate::serde::{Hash, Row, RowDeError};
 use ::serde::Deserialize;
 

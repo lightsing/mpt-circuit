@@ -1,4 +1,5 @@
 use num_bigint::BigUint;
+use num_traits::identities::{One, Zero};
 use serde::Deserialize;
 use std::fmt::{Debug, Display, Formatter};
 
@@ -13,7 +14,11 @@ pub enum RowDeError {
     BigInt,
 }
 
-#[derive(Debug)]
+pub trait Verify {
+    fn verify(&self) -> bool;
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Row {
     pub is_first: bool,
     pub sib: Hash,
@@ -28,6 +33,214 @@ pub struct Row {
     pub new_value: Hash,
     pub key: Hash,
     pub new_root: Hash,
+}
+
+impl Verify for Vec<Row> {
+    fn verify(&self) -> bool {
+        const VALID_STATE: &[HashType] = &[
+            HashType::Empty,
+            HashType::Leaf,
+            HashType::Middle,
+            HashType::LeafExt,
+            HashType::LeafExtFinal,
+        ];
+        const VALID_TRANSACTION: &[(HashType, HashType)] = &[
+            (HashType::Middle, HashType::Middle),
+            (HashType::Middle, HashType::Empty),
+            (HashType::Middle, HashType::Leaf),
+            (HashType::Middle, HashType::LeafExt),
+            (HashType::Middle, HashType::LeafExtFinal),
+            (HashType::LeafExt, HashType::LeafExt),
+            (HashType::LeafExt, HashType::LeafExtFinal),
+            (HashType::LeafExtFinal, HashType::Empty),
+            (HashType::LeafExtFinal, HashType::Leaf),
+        ];
+        const VALID_TRANSITIONS: &[(HashType, HashType)] = &[
+            (HashType::Empty, HashType::Leaf),
+            (HashType::Leaf, HashType::Empty),
+            (HashType::Leaf, HashType::Leaf),
+            (HashType::Middle, HashType::LeafExtFinal),
+            (HashType::LeafExtFinal, HashType::Middle),
+            (HashType::Middle, HashType::LeafExt),
+            (HashType::LeafExt, HashType::Middle),
+            (HashType::Middle, HashType::Middle),
+        ];
+
+        if self.is_empty() {
+            return true;
+        }
+
+        let mut verified = true;
+
+        // part 1: check hash calculations of adjacent rows
+        for (idx, row) in self.iter().enumerate() {
+            if row.is_first {
+                continue;
+            }
+            if self[idx - 1].old_value != row.old_hash {
+                error!(
+                    "adjacent row old hash mismatch: {} {}",
+                    self[idx - 1].old_value,
+                    row.old_hash
+                );
+                verified = false
+            }
+            if self[idx - 1].new_value != row.new_hash {
+                error!(
+                    "adjacent row new hash mismatch: {} {}",
+                    self[idx - 1].new_value,
+                    row.new_hash
+                );
+                verified = false
+            }
+        }
+        // part 2.1: check ‘HashType’ of adjacent rows
+        for (idx, row) in self.iter().enumerate() {
+            if row.is_first {
+                if !VALID_STATE.contains(&row.old_hash_type) {
+                    error!("old hash type invalid: {:?}", row.old_hash_type);
+                    verified = false
+                }
+                if !VALID_STATE.contains(&row.new_hash_type) {
+                    error!("new hash type invalid: {:?}", row.new_hash_type);
+                    verified = false
+                }
+            } else {
+                if !VALID_TRANSACTION.contains(&(self[idx - 1].old_hash_type, row.old_hash_type)) {
+                    error!(
+                        "invalid transaction from {:?} to {:?}",
+                        self[idx - 1].old_hash_type,
+                        row.old_hash_type
+                    );
+                    verified = false
+                }
+                if !VALID_TRANSACTION.contains(&(self[idx - 1].new_hash_type, row.new_hash_type)) {
+                    error!(
+                        "invalid transaction from {:?} to {:?}",
+                        self[idx - 1].new_hash_type,
+                        row.new_hash_type
+                    );
+                    verified = false
+                }
+            }
+        }
+        // part 2.2: check HashType between old and new
+        for row in self.iter() {
+            if !VALID_TRANSITIONS.contains(&(row.old_hash_type, row.new_hash_type)) {
+                error!(
+                    "invalid transition from {:?} to {:?}",
+                    row.old_hash_type, row.new_hash_type
+                );
+                verified = false
+            }
+        }
+        // part 3: check hash calculation
+        for (idx, row) in self.iter().enumerate() {
+            match row.old_hash_type {
+                HashType::Empty => {
+                    if row.old_hash != Hash::zero() {
+                        error!("#{} hash mismatch", idx);
+                        verified = false
+                    }
+                }
+                HashType::Middle => {
+                    // unimplemented
+                }
+                HashType::LeafExt => {
+                    if row.old_value != row.old_hash {
+                        error!("#{} hash mismatch", idx);
+                        verified = false
+                    }
+                }
+                HashType::LeafExtFinal => {
+                    if row.sib != row.old_hash {
+                        error!("#{} hash mismatch", idx);
+                        verified = false
+                    }
+                }
+                HashType::Leaf => {
+                    // unimplemented
+                }
+            }
+
+            match row.new_hash_type {
+                HashType::Empty => {
+                    if row.new_hash != Hash::zero() {
+                        error!("#{} hash mismatch", idx);
+                        verified = false
+                    }
+                }
+                HashType::Middle => {
+                    // unimplemented
+                }
+                HashType::LeafExt => {
+                    if row.new_value != row.new_hash {
+                        error!("#{} hash mismatch", idx);
+                        verified = false
+                    }
+                }
+                HashType::LeafExtFinal => {
+                    if row.sib != row.new_hash {
+                        error!("#{} hash mismatch", idx);
+                        verified = false
+                    }
+                }
+                HashType::Leaf => {
+                    // unimplemented
+                }
+            }
+        }
+        // part4: check key
+        for (idx, row) in self.iter().enumerate() {
+            if let HashType::Middle | HashType::LeafExt | HashType::LeafExtFinal = row.old_hash_type
+            {
+                if row.path != BigUint::zero() && row.path != BigUint::one() {
+                    error!(
+                        "mid/leafext/leafextfinal should have path 0/1 instead of {}",
+                        row.path.to_str_radix(2)
+                    );
+                    verified = false
+                }
+            }
+            if let HashType::Middle | HashType::LeafExt | HashType::LeafExtFinal = row.new_hash_type
+            {
+                if row.path != BigUint::zero() && row.path != BigUint::one() {
+                    error!(
+                        "mid/leafext/leafextfinal should have path 0/1 instead of {}",
+                        row.path.to_str_radix(2)
+                    );
+                    verified = false
+                }
+            }
+            if row.is_first {
+                if row.depth != 0 {
+                    error!("first row should have depth 0 instead of {}", row.depth);
+                    verified = false
+                }
+            } else {
+                let expected = self[idx - 1].depth + 1;
+                if row.depth != expected {
+                    error!(
+                        "row should have depth {} instead of {}",
+                        expected, row.depth
+                    );
+                    verified = false
+                }
+            }
+            if idx == self.len() - 1 || self[idx + 1].is_first {
+                let converted = BigUint::from(row.key);
+                if converted != row.path_acc {
+                    error!(
+                        "leaf should have path_acc == key, key: {}, path_acc: {}",
+                        converted.to_str_radix(2),
+                        row.path_acc.to_str_radix(2)
+                    );
+                    verified = false
+                }
+            }
+        }
+        return verified;
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,9 +292,19 @@ impl TryFrom<&RowDe> for Row {
 pub struct Hash([u8; 32]);
 
 impl Hash {
+    /// create hash from bytes array
+    pub fn new(value: [u8; 32]) -> Self {
+        Self(value)
+    }
+
     /// get hex representation of hash
     pub fn hex(&self) -> String {
         hex::encode(self.0)
+    }
+
+    #[inline(always)]
+    const fn zero() -> Hash {
+        Hash([0; 32])
     }
 }
 
@@ -119,19 +342,35 @@ impl TryFrom<&str> for Hash {
     }
 }
 
+impl From<Hash> for BigUint {
+    fn from(hash: Hash) -> Self {
+        BigUint::from_bytes_le(&hash.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Once;
 
+    static INIT: Once = Once::new();
     const TEST_FILE: &'static str = include_str!("../rows.jsonl");
+
+    fn setup() {
+        INIT.call_once(|| {
+            pretty_env_logger::init();
+        })
+    }
 
     #[test]
     fn test_de() {
+        setup();
         RowDe::from_lines(TEST_FILE).unwrap();
     }
 
     #[test]
     fn test_parse() {
+        setup();
         let rows: Result<Vec<Row>, RowDeError> = RowDe::from_lines(TEST_FILE)
             .unwrap()
             .iter()
@@ -141,11 +380,12 @@ mod tests {
         for row in rows.iter() {
             println!("{:?}", row);
         }
+        assert!(rows.verify());
     }
 }
 
 /// Indicate the type of a row
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialOrd, PartialEq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub enum HashType {
     /// Empty node
