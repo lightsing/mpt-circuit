@@ -14,24 +14,39 @@ pub enum RowDeError {
     BigInt,
 }
 
+/// Verify Rows
 pub trait Verify {
     fn verify(&self) -> bool;
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
+/// struct for a halo row
 pub struct Row {
+    /// is this the first row
     pub is_first: bool,
+    /// the sibling hash
     pub sib: Hash,
+    /// the current depth
     pub depth: usize,
+    /// the path
     pub path: BigUint,
+    /// the path_acc
     pub path_acc: BigUint,
+    /// HashType of old_hash
     pub old_hash_type: HashType,
+    /// old hash
     pub old_hash: Hash,
+    /// old value
     pub old_value: Hash,
+    /// HashType of new_hash
     pub new_hash_type: HashType,
+    /// new hash
     pub new_hash: Hash,
+    /// new value
     pub new_value: Hash,
+    /// key of this row
     pub key: Hash,
+    /// new hash root
     pub new_root: Hash,
 }
 
@@ -239,7 +254,7 @@ impl Verify for Vec<Row> {
                 }
             }
         }
-        return verified;
+        verified
     }
 }
 
@@ -289,6 +304,7 @@ impl TryFrom<&RowDe> for Row {
 }
 
 #[derive(Default, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+/// a wrapper for Hash operations.
 pub struct Hash([u8; 32]);
 
 impl Hash {
@@ -303,6 +319,7 @@ impl Hash {
     }
 
     #[inline(always)]
+    /// get constant zero hash
     const fn zero() -> Hash {
         Hash([0; 32])
     }

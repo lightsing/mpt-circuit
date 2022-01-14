@@ -8,7 +8,6 @@
 extern crate log;
 
 pub use crate::serde::{Hash, Row, RowDeError};
-use ::serde::Deserialize;
 
 pub mod mpt;
 pub mod operations;
